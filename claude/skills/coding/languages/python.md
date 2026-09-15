@@ -22,6 +22,12 @@ concrete in Python.
   child, never the reverse).
 - Domain objects segregated by source system when a project talks to more than one
   external system (e.g. `model/crm/`, `model/et/`, `model/mapping/`).
+- No generic `utils`/`helpers` packages. Name a package after the functional purpose
+  it serves (`et/auth/`, `et/retry/`), not what it vaguely contains — a grab-bag
+  module is where dead code and duplicated logic go to hide.
+- Imports at the top of the file. A function-level import needs a genuine reason —
+  breaking a circular import, or avoiding an expensive/optional dependency on a cold
+  path — not just habit; if you can't state the reason, it belongs at the top.
 
 ## Method Size & Decomposition
 
@@ -34,6 +40,24 @@ concrete in Python.
   auth) around the private implementation.
 - 404/not-found from an external call is handled by returning `None`, not raising —
   reserve exceptions for actually-exceptional conditions, not expected absence.
+
+## Queries and Mutations Belong on the Model
+
+A query or mutation that's really about one model lives on that model, not on a
+generic helper class or a loose service function — `OrgMapping.get_business_id_for_oid()`,
+`Cadence.get_active_for_org()`, not a `mapping_helpers.get_business_id(oid)` reached
+for from three different call sites. Callers ask the model, they don't reassemble
+the model's own query logic themselves.
+
+If a model method is actually hot enough to need caching, use `cachetools.func`
+(e.g. `@ttl_cache`) rather than a hand-rolled module-level dict cache — the latter
+has no eviction policy, no thread-safety story, and reinvents what the library
+already gives you for free. Don't reach for caching pre-emptively; confirm it's
+actually hot first.
+
+A `model.save()` already commits (or the caller's transaction boundary already will)
+— a `session.commit()` immediately after is redundant and a sign the transaction
+boundary isn't clearly owned by one layer. Flag it in review.
 
 ## The Adapter Pattern (testability boundary)
 
@@ -82,6 +106,12 @@ Real examples from Doug's repos:
 - **et-crm-integrations** — `EvertrueAPIClient` / `NangoAPIClient` wrap their
   respective external APIs behind a client class; `RETRYABLE_STATUS_CODES` is
   declared once and checked by membership, not duplicated per client.
+
+Test-only and environment-specific concerns (a sandbox mode, a "don't actually send
+this email in staging" switch) are solved at this same infra boundary — the client
+or its configuration — not baked into the production data model as an extra column
+or a branch in business logic. The model shouldn't know it's being tested against;
+the adapter it talks to should be the thing that's different.
 
 ## Configuration-Driven Design
 
@@ -171,6 +201,15 @@ mechanism for making this the boundary's job: they raise (typically an
 user isn't authorized, so every function downstream of the route can be written as if
 its arguments are already known-good.
 
+## Use the SDK's Typed Client
+
+Where a generated typed client exists for a service (the SDK), route every call to
+that service through it — flag a hand-rolled HTTP callable, a raw string query, or a
+parameter/return typed as `Any` where the client would already give a real type. The
+whole point of generating the client is that callers stop hand-maintaining their own
+untyped version of the same contract; bypassing it re-introduces the exact class of
+bug (a typo'd field name, a wrong type) the client exists to catch at write time.
+
 ## Type Hints & Models
 
 - Full type annotations everywhere, including generics for reusable abstractions
@@ -182,6 +221,68 @@ its arguments are already known-good.
 - Use a lenient base model (`ConfigDict(extra="allow")`) for parsing external APIs
   you don't control, and a strict model for your own internal schemas — don't let an
   upstream API adding a field break your parsing.
+- Reuse the SDK's canonical Pydantic models rather than reinventing a parallel DTO
+  for the same data. If you need extra fields, extend the SDK's base model — don't
+  bypass it and hand-write a lookalike that will drift the moment the SDK's model
+  changes.
+- Prefer `None` over sentinel values (`-1`, `""`, `"N/A"`) at API and DB boundaries.
+  A sentinel is a magic value every consumer has to know to check for; `None` is
+  checked by the type system and by `is None`, not by convention.
+- Use `NamedTuple` for anything with three or more positional elements, instead of a
+  bare tuple or an untyped `dict`. `result[2]` tells a reader nothing; `result.status`
+  does.
+
+## State Transitions: DRY Into One Method
+
+When a state transition is paired with a side effect that must never be forgotten
+at a call site — an audit-trail write alongside a status change, a cache
+invalidation alongside a save — DRY the transition and its side effect into a single
+method, and have every caller go through it. The risk isn't duplicated logic in the
+abstract; it's a second call site that changes the state but forgets the write that
+was supposed to always come with it. If there's only one method capable of making
+the transition, there's no way to make it without the side effect.
+
+## GraphQL Field-Selection Contract
+
+Respect what the client actually asked for. Use `from_model(info)` (or the
+equivalent field-selection helper) to conditionally load relationships based on the
+GraphQL selection set, rather than a blanket `selectinload()` that eagerly loads
+every relationship regardless of whether the query requested it. A blanket eager
+load defeats the entire purpose of a field-selection contract and turns a cheap
+query into an expensive one for every caller, including the ones that didn't ask for
+the extra data.
+
+## Migrations (Alembic)
+
+A migration is justified by real data or a real behavior change — never a "just in
+case" migration or a speculative backfill run against data nobody's confirmed needs
+it. If you can't point to the query or bug that requires the schema change, it isn't
+ready to write yet.
+
+## Extra Scrutiny on Code That Smells AI-Generated
+
+Apply extra scrutiny to code with these tells, whether or not it's known to be
+AI-generated — they're the same failure modes either way:
+
+- A hallucinated API — a method or parameter that doesn't exist on the library/SDK
+  being called; verify against the actual installed version, don't assume it compiles
+  because it reads plausibly.
+- An unjustified default value with no comment explaining where it came from.
+- A "just in case" migration or backfill with no real data or behavior change behind
+  it (see Migrations above).
+- A `TYPE_CHECKING`-guarded import with no genuine circular-import reason — if the
+  type is actually used at runtime, or there's no cycle to break, it doesn't need the
+  guard.
+
+## Restraint Before New Abstractions
+
+Before building a new table, mutation, or helper, ask whether an existing one can
+just be extended. A near-duplicate model or a second mutation that does almost what
+an existing one does is usually a sign the existing one wasn't found or wasn't
+considered, not that the new case is genuinely different. Push back on the new
+abstraction in review before it's built and has to be maintained twice. The same
+pass should flag dead code with no call sites — code that exists "in case it's
+needed" is a liability, not an asset.
 
 ## Naming Conventions
 

@@ -20,6 +20,11 @@ concrete in Java.
 - Consistent suffixes make a file's role obvious from its name alone: `*Resource`
   (controller), `*Manager` (service/business logic), `*Dao` (data access), `*Client`
   (external adapter), `*Module` (Guice wiring), `*Exception`.
+- No `utils`/`helper`/kitchen-sink packages or classes. A grab-bag `SmsUtils` that
+  accumulates unrelated static methods is a smell — logic goes on the model it
+  concerns (`SmsStatus.isTerminal()`, not `SmsUtils.isTerminalStatus(status)`) or on a
+  class named for its one purpose. This is the single most repeated review objection —
+  check for the right home before adding to (or creating) a generic helper.
 
 ## Method Size & Decomposition
 
@@ -29,6 +34,13 @@ concrete in Java.
   `preferOrgOverGlobal()`) rather than inlining all of it.
 - A manager method that wraps a single DAO call and nothing else is fine as a
   one-liner — not every method needs to do more than delegate.
+- Method parameters are ordered broadest scope to narrowest — `oid` (org), then any
+  intermediate scoping id, then the specifics of the call. A reader (and a diff)
+  should see the blast radius of a call before its details.
+- Capture the *why* behind a non-obvious decision in the code itself — a comment
+  next to the line it justifies — not only in the PR description or a Slack thread.
+  Those don't travel with the file; the next person to touch this method won't see
+  them.
 
 ## The Adapter Pattern (testability boundary)
 
@@ -67,6 +79,11 @@ Business logic (managers, resources) depends only on `VoipClient`, never on
 a fake implementation, so nothing under test needs to mock deep into a third-party
 client library.
 
+The interface itself must stay provider-agnostic — no Twilio type, status code, or
+naming convention should leak into `VoipClient`'s method signatures or return types.
+If swapping the provider would mean changing the interface, the abstraction isn't
+actually generic yet.
+
 Reference: `VoipClient`/`TwilioVoipClient` (outreach) for the SDK-wrapping case;
 `GraphQlClient` (contacts) for an HTTP adapter that centralizes exception handling
 for an internal service call.
@@ -95,6 +112,10 @@ allowed."
 Configuration values themselves (API keys, feature toggles) are bound once through DI
 (`@Provides @Named("com.et.twilio.account_sid")`) and injected wherever needed,
 rather than read from environment/config ad hoc at each call site.
+
+Enums and `public static final` constants over magic strings, always. A bare
+`"FAILED"` string scattered across callers can't be enforced by the compiler and
+drifts silently if one call site typos it; `SmsStatus.FAILED` can't.
 
 ## Dependency Injection
 
@@ -151,6 +172,78 @@ deliveries, which no amount of controller-level validation up front could catch.
 - Centralize translation from internal exceptions to HTTP responses in one place —
   a JAX-RS `ExceptionMapper<T>` per exception type — rather than a `try`/`catch` in
   every resource method.
+- Catch the specific exception a call can actually throw, never a bare `Exception`
+  (or `Throwable`). A blanket catch swallows bugs it was never meant to handle
+  alongside the failure it was written for.
+- A failure must stay visible. Logging it and moving on — "log-and-vanish" — is
+  banned: either send it to Sentry (or the project's equivalent) or rethrow it.
+  A caught-and-logged exception with no rethrow and no alerting is a bug that will
+  only be found by a customer.
+- Log and error messages are human-readable and carry the ids involved (`oid`,
+  the record id, the external call's identifier) — not a bare stack trace or a
+  message that only makes sense next to the line that threw it.
+
+## Multi-Tenancy: Every Query Scoped by oid
+
+Every query and mutation that touches org-scoped data is filtered by `oid`. A
+missing `oid` filter is treated as a correctness/security bug class — one org
+reading or writing another org's rows — not a style nit, and is called out with the
+same weight as a SQL injection finding. This is also why `oid` is the first
+parameter in method signatures (see parameter ordering above): it's the thing a
+reviewer must be able to confirm is present and threaded through before looking at
+anything else.
+
+## Typed POJOs over JsonNode/Map
+
+Model external and internal payloads as typed POJOs, not `JsonNode` or
+`Map<String, Object>` passed around and re-parsed at each call site. Validation
+(required fields, format, ranges) lives on the model — a constructor or a
+`validate()` method the model owns — not scattered across every place that happens
+to read the map. A typed field either exists and is well-formed by the time it
+reaches business logic, or the model failed to construct in the first place.
+
+## Performance: Reuse and Batch
+
+- Reuse expensive-to-construct objects (`ObjectMapper`, HTTP client instances,
+  compiled patterns) as `static final` fields — never re-instantiated per call or
+  per request.
+- Prefer bulk/batch operations over per-row round trips to a database, search index,
+  or distributed job. Count the actual number of round trips a code path makes, not
+  just whether it "looks batched" — a loop calling a batched-looking API once per row
+  is still N round trips. This applies with particular force to Spark jobs and
+  Elasticsearch calls, where triggering an action (a Spark action, an ES request)
+  inside a per-row loop is an easy and expensive mistake to make.
+
+## Migration & Schema Hygiene
+
+- Primary keys are `bigint`, not `int` — an `int` PK is a migration waiting to
+  happen once the table grows.
+- Tables are plural, models are singular (`accounts` table ↔ `Account` model).
+- Foreign keys are required (`NOT NULL`) unless the relationship is genuinely
+  optional — an optional-looking FK is usually a missing backfill, not a real
+  business rule.
+- A migration touches only the schema it's justified by — no incidental diffs
+  (reordered columns, unrelated index changes) riding along with the change that
+  was actually asked for.
+- Renaming a column or table on a large, live table can hit lock/timeout limits;
+  treat a rename as a multi-step migration (add new, backfill, cut over, drop old),
+  not a single blocking `ALTER`.
+- Indexing is deliberate — added because a known query needs it, not defensively
+  "just in case," and not omitted because "it's a small table today."
+
+## Restraint Before New Abstractions
+
+Before adding a new client, cache, or abstraction layer, check whether one already
+exists that can be extended. A second bespoke Redis cache wrapper or a second HTTP
+client for a service that already has one is a sign the existing one wasn't found,
+not that a new one was needed. Push back on the new abstraction in review — ask the
+author to point at what they checked and why it didn't fit — before it gets built
+and now has to be maintained twice.
+
+The same restraint applies to duplicated logic that isn't yet a new abstraction: DRY
+it into one method or a shared, purpose-named package rather than letting the same
+transition/parsing/formatting logic exist in two places that will inevitably drift.
+This is not license to create a `utils` package for it — see File Organization above.
 
 ## Naming Conventions
 
