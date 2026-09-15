@@ -27,6 +27,7 @@ Before writing or modifying code:
 |---|---|
 | Ruby | `languages/ruby.md` |
 | Python | `languages/python.md` |
+| Java | `languages/java.md` |
 | *(others)* | not yet authored — apply the principles below |
 
 ## Universal Principles

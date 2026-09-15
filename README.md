@@ -13,5 +13,7 @@ AI Tools
   [`languages/ruby.md`](claude/skills/coding/languages/ruby.md) (based on
   `dynamic-active-model`, `schema`, `db-purger`, and `client-api-builder`) and
   [`languages/python.md`](claude/skills/coding/languages/python.md) (based on
-  `et-python-sdk` and `et-crm-integrations`). Additional languages get their own file
-  once there's a real repo of Doug's to draw the patterns from.
+  `et-python-sdk` and `et-crm-integrations`), and
+  [`languages/java.md`](claude/skills/coding/languages/java.md) (based on `contacts`
+  and `outreach`). Additional languages get their own file once there's a real repo
+  of Doug's to draw the patterns from.
