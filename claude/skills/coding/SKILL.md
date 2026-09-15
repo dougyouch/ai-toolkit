@@ -1,17 +1,16 @@
 ---
 name: coding
-description: Doug's personal multi-language coding standards — one class per file, small testable methods, adapter pattern at I/O boundaries, composition over inheritance. Use before writing or modifying application/library code (not one-off scripts) in any language. Loads a language-specific file for idiom-level detail; falls back to the universal principles here when no language file exists yet.
+description: Multi-language coding standards — one class per file, small testable methods, adapter pattern at I/O boundaries, composition over inheritance. Use before writing or modifying application/library code (not one-off scripts) in any language. Loads a language-specific file for idiom-level detail; falls back to the universal principles here when no language file exists yet.
 metadata:
   type: coding-standards
-  source: distilled from dynamic-active-model, schema, db-purger, and client-api-builder (github.com/dougyouch)
 ---
 
 # Coding Standards
 
-A layered skill. This file holds the principles that hold across every language Doug
-writes in. Each principle exists because it showed up independently, more than once,
-across his own gems — this is not a generic style guide, it is a description of how
-he actually builds software when there's no deadline forcing shortcuts.
+A layered skill. This file holds the principles that hold across every language. Each
+principle exists because it showed up independently, more than once, across real
+production code — this is not a generic style guide, it is a description of how to
+actually build software when there's no deadline forcing shortcuts.
 
 Before writing or modifying code:
 
@@ -19,9 +18,9 @@ Before writing or modifying code:
 2. Read the matching file in `languages/` if one exists (see table below) — it has
    concrete syntax, idioms, and code examples for that language.
 3. If no language file exists yet, apply the universal principles below directly, and
-   mention to Doug that this language doesn't have a dedicated file yet — it's worth
-   adding once there's a real repo of his to draw the patterns from, rather than
-   guessing at conventions he hasn't actually chosen.
+   note that this language doesn't have a dedicated file yet — it's worth adding once
+   there's a real codebase to draw the patterns from, rather than guessing at
+   conventions that haven't actually been chosen.
 
 | Language | File |
 |---|---|

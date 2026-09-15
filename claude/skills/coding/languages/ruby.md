@@ -1,9 +1,8 @@
 # Ruby Coding Standards
 
-Distilled from four of Doug's own gems: `dynamic-active-model`, `schema`, `db-purger`,
-and `client-api-builder`. These are library/gem-shaped standards — for
-migration/Rake-task conventions in a specific application codebase, that's a separate,
-narrower concern and lives elsewhere; don't conflate the two.
+These are library/gem-shaped standards — for migration/Rake-task conventions in a
+specific application codebase, that's a separate, narrower concern and lives
+elsewhere; don't conflate the two.
 
 Read [../SKILL.md](../SKILL.md) first for the universal principles this file makes
 concrete in Ruby.
@@ -73,19 +72,11 @@ In specs, stub at the network boundary (WebMock's `stub_request`) rather than mo
 the adapter module itself — the adapter exists to make the real boundary thin enough
 that stubbing it is cheap and realistic, so use that, don't route around it with mocks.
 
-Real examples from Doug's gems, for reference:
-
-- **client-api-builder** — `ClientApiBuilder::NetHTTP::Request` wraps `Net::HTTP`
-  behind `request` / `stream` / `stream_to_file`, included into any class that
-  `include`s `Router`. Specs use WebMock against real HTTP calls, not mocks of the
-  adapter. The adapter also owns boundary security concerns (path traversal checks,
-  default-secure SSL options) — the boundary is the natural place to enforce them
-  once, rather than at every call site.
-- **db-purger** — `Executor` takes `database`, `plan`, and `options` via constructor
-  injection, and exposes an `error_io=` setter purely so specs can capture output
-  without touching global state.
-- **dynamic-active-model** — `Database` and `Factory` take `connection_options`
-  through the constructor rather than reading global configuration.
+The adapter is also the natural place to enforce boundary security concerns once
+(path traversal checks, default-secure SSL options) rather than at every call site.
+Collaborators like a database connection or an options hash arrive through the
+constructor rather than global configuration, and a setter meant purely for specs to
+capture output (`error_io=`) is fine as long as it doesn't touch global state.
 
 ## Configuration-Driven Design
 
@@ -122,13 +113,6 @@ class Invoice
   field :issued_on, :date
 end
 ```
-
-Real examples from Doug's gems: client-api-builder's `route`/`section` DSL generates
-every client method from declared endpoints rather than hand-written per-endpoint
-code; db-purger's `PlanBuilder` declares a purge plan as data that `Executor`
-interprets, including nested child/foreign tables, without the executor knowing
-anything about a specific schema; schema's field declarations drive parsing and
-validation from a declared type instead of per-field custom logic.
 
 The testability payoff: a method whose behavior comes entirely from its
 configuration input can be tested by feeding it every configuration permutation that

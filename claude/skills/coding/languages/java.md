@@ -1,9 +1,5 @@
 # Java Coding Standards
 
-Distilled from two of Doug's own services: `contacts` (a Dropwizard/Guice contact
-management API) and `outreach` (a Dropwizard/Guice email/SMS/VOIP service
-integrating Twilio, Postmark, Mailgun, and Nylas).
-
 Read [../SKILL.md](../SKILL.md) first for the universal principles this file makes
 concrete in Java.
 
@@ -34,9 +30,10 @@ concrete in Java.
   `preferOrgOverGlobal()`) rather than inlining all of it.
 - A manager method that wraps a single DAO call and nothing else is fine as a
   one-liner — not every method needs to do more than delegate.
-- Method parameters are ordered broadest scope to narrowest — `oid` (org), then any
-  intermediate scoping id, then the specifics of the call. A reader (and a diff)
-  should see the blast radius of a call before its details.
+- Method parameters are ordered broadest scope to narrowest — the tenant id (in a
+  multi-tenant system), then any intermediate scoping id, then the specifics of the
+  call. A reader (and a diff) should see the blast radius of a call before its
+  details.
 - Capture the *why* behind a non-obvious decision in the code itself — a comment
   next to the line it justifies — not only in the PR description or a Slack thread.
   Those don't travel with the file; the next person to touch this method won't see
@@ -83,10 +80,6 @@ The interface itself must stay provider-agnostic — no Twilio type, status code
 naming convention should leak into `VoipClient`'s method signatures or return types.
 If swapping the provider would mean changing the interface, the abstraction isn't
 actually generic yet.
-
-Reference: `VoipClient`/`TwilioVoipClient` (outreach) for the SDK-wrapping case;
-`GraphQlClient` (contacts) for an HTTP adapter that centralizes exception handling
-for an internal service call.
 
 ## Configuration-Driven Design
 
@@ -140,13 +133,13 @@ public Response createDomain(@Auth User user, DomainRequest request) {
     WebPreconditions.checkArgument(user.isSuperUser(), "not authorized");
     validateDomainNameForUser(user, request.getDomain());
 
-    postmarkDomainManager.createDomain(user.getOid(), request.getDomain());
+    postmarkDomainManager.createDomain(user.getTenantId(), request.getDomain());
     return Response.ok().build();
 }
 
-// Manager — trusts that oid/domain are already valid; no re-checking here
-public void createDomain(int oid, String domain) {
-    domainDao.insert(oid, domain);
+// Manager — trusts that tenantId/domain are already valid; no re-checking here
+public void createDomain(int tenantId, String domain) {
+    domainDao.insert(tenantId, domain);
 }
 ```
 
@@ -164,7 +157,7 @@ deliveries, which no amount of controller-level validation up front could catch.
 When the same permission check needs to be reusable from a second call site that
 isn't already behind a resource — a Sidekiq-style background job, an internal
 service call — don't give the manager method a boolean to make the check optional
-(`createDomain(int oid, String domain, boolean skipPermissionCheck)`). That's a sign
+(`createDomain(int tenantId, String domain, boolean skipPermissionCheck)`). That's a sign
 the check belongs in its own method. Add a second, checked entry point instead
 (`createDomainWithPermissionCheck(User user, String domain)`) that runs the check —
 reusing the same `checkArgumentGivingTreeUser`-style helper the resource layer uses —
@@ -189,8 +182,8 @@ method that matches whether it's already behind a validated boundary.
   banned: either send it to Sentry (or the project's equivalent) or rethrow it.
   A caught-and-logged exception with no rethrow and no alerting is a bug that will
   only be found by a customer.
-- Log and error messages are human-readable and carry the ids involved (`oid`,
-  the record id, the external call's identifier) — not a bare stack trace or a
+- Log and error messages are human-readable and carry the ids involved (the tenant
+  id, the record id, the external call's identifier) — not a bare stack trace or a
   message that only makes sense next to the line that threw it.
 - Log every exception at the point it's caught, even when the catch exists only to
   retry (`RetryableSendException` caught inside a retry loop still gets a `log.warn`
@@ -205,15 +198,15 @@ method that matches whether it's already behind a validated boundary.
   `ExceptionMapper`, has that context. Catch low only to wrap with more context and
   rethrow; catch-and-decide belongs at the boundary.
 
-## Multi-Tenancy: Every Query Scoped by oid
+## Multi-Tenancy: Every Query Scoped by Tenant ID
 
-Every query and mutation that touches org-scoped data is filtered by `oid`. A
-missing `oid` filter is treated as a correctness/security bug class — one org
-reading or writing another org's rows — not a style nit, and is called out with the
-same weight as a SQL injection finding. This is also why `oid` is the first
-parameter in method signatures (see parameter ordering above): it's the thing a
-reviewer must be able to confirm is present and threaded through before looking at
-anything else.
+In a multi-tenant system, every query and mutation that touches tenant-scoped data
+is filtered by the tenant id. A missing tenant id filter is treated as a
+correctness/security bug class — one tenant reading or writing another tenant's
+rows — not a style nit, and is called out with the same weight as a SQL injection
+finding. This is also why the tenant id is the first parameter in method signatures
+(see parameter ordering above): it's the thing a reviewer must be able to confirm is
+present and threaded through before looking at anything else.
 
 ## Typed POJOs over JsonNode/Map
 

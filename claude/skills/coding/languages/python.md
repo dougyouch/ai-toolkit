@@ -1,17 +1,13 @@
 # Python Coding Standards
 
-Distilled from Doug's own repos: `et-python-sdk` (an SDK — the primary source for the
-HTTP-adapter pattern) and `et-crm-integrations` (a FastAPI service showing the
-same principles applied at application scale).
-
 Read [../SKILL.md](../SKILL.md) first for the universal principles this file makes
 concrete in Python.
 
 ## File Organization
 
 - Single-responsibility packages, one clear concern per module:
-  `et/http/`, `et/auth/`, `et/aws/` in the SDK; `service/`, `repository/`, `client/`,
-  `model/` layers in the CRM integration service.
+  `http/`, `auth/`, `aws/` in a library; `service/`, `repository/`, `client/`,
+  `model/` layers in an application service.
 - A file holds one class plus its close helpers — `mapping_service.py` holds only
   `MappingService` (orchestration); `mapping_repository.py` holds only
   `MappingRepository` (pure data access). Splitting a "mapping" concern into a
@@ -21,10 +17,10 @@ concrete in Python.
   reaching into internal modules — imports flow one direction (parent depends on
   child, never the reverse).
 - Domain objects segregated by source system when a project talks to more than one
-  external system (e.g. `model/crm/`, `model/et/`, `model/mapping/`).
+  external system (e.g. `model/crm/`, `model/billing/`, `model/mapping/`).
 - No generic `utils`/`helpers` packages. Name a package after the functional purpose
-  it serves (`et/auth/`, `et/retry/`), not what it vaguely contains — a grab-bag
-  module is where dead code and duplicated logic go to hide.
+  it serves (`auth/`, `retry/`), not what it vaguely contains — a grab-bag module is
+  where dead code and duplicated logic go to hide.
 - Imports at the top of the file. A function-level import needs a genuine reason —
   breaking a circular import, or avoiding an expensive/optional dependency on a cold
   path — not just habit; if you can't state the reason, it belongs at the top.
@@ -44,10 +40,11 @@ concrete in Python.
 ## Queries and Mutations Belong on the Model
 
 A query or mutation that's really about one model lives on that model, not on a
-generic helper class or a loose service function — `OrgMapping.get_business_id_for_oid()`,
-`Cadence.get_active_for_org()`, not a `mapping_helpers.get_business_id(oid)` reached
-for from three different call sites. Callers ask the model, they don't reassemble
-the model's own query logic themselves.
+generic helper class or a loose service function —
+`TenantMapping.get_business_id_for_tenant()`, `Cadence.get_active_for_tenant()`, not
+a `mapping_helpers.get_business_id(tenant_id)` reached for from three different call
+sites. Callers ask the model, they don't reassemble the model's own query logic
+themselves.
 
 If a model method is actually hot enough to need caching, use `cachetools.func`
 (e.g. `@ttl_cache`) rather than a hand-rolled module-level dict cache — the latter
@@ -96,16 +93,6 @@ In tests, patch the underlying transport (`httpx.request`) or build a mock respo
 with a small test helper (`mock_http_response(...)`), rather than mocking the client
 class itself — same principle as stubbing at the wire in Ruby's WebMock usage: the
 adapter exists to make that safe.
-
-Real examples from Doug's repos:
-
-- **et-python-sdk** — `BaseHttpClient` (`et/http/_base.py`) centralizes
-  `_prepare`/`_handle_response`/retry logic; `HttpClient` and `AsyncHttpClient`
-  inherit it and only override the send mechanism. Tests patch `httpx.request`
-  directly or use `mock_http_response()` from `et/testutils/helpers.py`.
-- **et-crm-integrations** — `EvertrueAPIClient` / `NangoAPIClient` wrap their
-  respective external APIs behind a client class; `RETRYABLE_STATUS_CODES` is
-  declared once and checked by membership, not duplicated per client.
 
 Test-only and environment-specific concerns (a sandbox mode, a "don't actually send
 this email in staging" switch) are solved at this same infra boundary — the client
