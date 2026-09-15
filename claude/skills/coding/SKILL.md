@@ -26,6 +26,7 @@ Before writing or modifying code:
 | Language | File |
 |---|---|
 | Ruby | `languages/ruby.md` |
+| Python | `languages/python.md` |
 | *(others)* | not yet authored — apply the principles below |
 
 ## Universal Principles
@@ -104,7 +105,31 @@ everything wrong at once. Define a small exception hierarchy scoped to the
 library/module, with a common base error, and give specific exceptions the context
 they need to be actionable (e.g. carry the response object, the offending record).
 
-### 9. Tests mirror source, and exercise real behavior
+### 9. Validate at the boundary; let internals trust their inputs
+
+Permission checks, existence checks, and input validation belong at the boundary
+where untrusted input enters the system — an API controller, a queue consumer entry
+point — not scattered through every downstream method the input eventually reaches.
+A utility method like `update_status(user, object, new_status)` should not re-check
+that `user` is allowed to do this or that `object` isn't null; by the time it's
+called, the caller has already established both. If they haven't, the method should
+fail loudly — a `NoMethodError`, a `NullPointerException`, an `AttributeError` — not
+silently return or guard around the bad state.
+
+This is deliberate, not an oversight. A defensive `if object.nil? then return` inside
+a utility method doesn't fix a bug, it hides one: the caller had no business calling
+with a null object, and swallowing that there means the real defect — whatever
+produced a null where the invariant said there wouldn't be one — surfaces later,
+further from its cause, or never surfaces at all. Let internal code fail hard and
+immediately at the point an invariant breaks; that's what makes a failure traceable
+back to its actual cause instead of a confusing downstream symptom.
+
+This is not a license to skip validation — it means validation happens exactly once,
+at the layer that owns it (a controller, a serializer, a request-validation layer),
+and every layer beneath it is written as if that validation already happened, because
+it did.
+
+### 10. Tests mirror source, and exercise real behavior
 
 Test files mirror the source tree file-for-file. Prefer asserting on real, observable
 state changes over verifying that a mock was called — this is only possible because
@@ -112,7 +137,7 @@ of the adapter pattern above, which makes the actual boundary (network, filesyst
 cheap and safe to exercise in tests via stubs at the wire rather than deep mocks of
 your own code.
 
-### 10. Naming communicates role
+### 11. Naming communicates role
 
 A small, consistent vocabulary of suffixes tells a reader what a class does without
 opening it: something that builds is a `Builder`, something that validates is a

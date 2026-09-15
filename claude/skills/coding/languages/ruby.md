@@ -167,6 +167,36 @@ each case.
 - Guard clauses (`return unless ...`, `next if ...`) over nested conditionals for
   early-exit validation.
 
+## Avoid Defensive Programming Downstream of the Boundary
+
+Permission and existence checks belong once, at the boundary that owns them — a
+controller, a Pundit policy, a `find!`/`find_by!` that raises when the record isn't
+there. A utility or service method that receives an already-validated object should
+not re-check it:
+
+```ruby
+# BAD — defensive checks hide the real bug and fail silently
+def update_status(user, object, new_status)
+  return unless object
+  return unless user&.can?(:update, object)
+  object.update!(status: new_status)
+end
+
+# GOOD — the controller already authorized the user and loaded the record
+# (or raised ActiveRecord::RecordNotFound / Pundit::NotAuthorizedError trying).
+# This method trusts both and fails loudly (NoMethodError) if that trust is broken.
+def update_status(user, object, new_status)
+  object.update!(status: new_status)
+end
+```
+
+The `return unless ...` guard-clause style earlier in this file (under Error
+Handling) is for the validation/parsing layer itself deciding whether *its own* input
+is well-formed — not for a downstream utility method re-guarding against a
+precondition its caller was already responsible for. If `object` can legitimately be
+`nil` by the time `update_status` is called, that's a bug in the caller to fix, not a
+case for `update_status` to handle gracefully.
+
 ## Modules & Composition
 
 - Prefer `include`/`extend` with a `self.included(base)` hook over subclassing.

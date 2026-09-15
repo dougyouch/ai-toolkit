@@ -10,7 +10,8 @@ AI Tools
   at I/O boundaries, composition over inheritance, configuration-driven design), and
   `languages/*.md` files hold language-specific idioms and code examples. These are
   distilled from Doug's own repos, not generic style guides — currently
-  [`languages/ruby.md`](claude/skills/coding/languages/ruby.md), based on
-  `dynamic-active-model`, `schema`, `db-purger`, and `client-api-builder`. Additional
-  languages get their own file once there's a real repo of Doug's to draw the
-  patterns from.
+  [`languages/ruby.md`](claude/skills/coding/languages/ruby.md) (based on
+  `dynamic-active-model`, `schema`, `db-purger`, and `client-api-builder`) and
+  [`languages/python.md`](claude/skills/coding/languages/python.md) (based on
+  `et-python-sdk` and `et-crm-integrations`). Additional languages get their own file
+  once there's a real repo of Doug's to draw the patterns from.
