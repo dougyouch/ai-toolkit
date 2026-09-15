@@ -161,6 +161,16 @@ control the boundary layer can't provide — e.g. the `WHERE status IN (?)` guar
 `SmsStatus.overridableBy()` protects against a race between two concurrent webhook
 deliveries, which no amount of controller-level validation up front could catch.
 
+When the same permission check needs to be reusable from a second call site that
+isn't already behind a resource — a Sidekiq-style background job, an internal
+service call — don't give the manager method a boolean to make the check optional
+(`createDomain(int oid, String domain, boolean skipPermissionCheck)`). That's a sign
+the check belongs in its own method. Add a second, checked entry point instead
+(`createDomainWithPermissionCheck(User user, String domain)`) that runs the check —
+reusing the same `checkArgumentGivingTreeUser`-style helper the resource layer uses —
+and then delegates to the bare `createDomain(int, String)`. Each call site picks the
+method that matches whether it's already behind a validated boundary.
+
 ## Error Handling
 
 - Define custom exceptions per failure domain (`EmailApiException`,
@@ -182,6 +192,18 @@ deliveries, which no amount of controller-level validation up front could catch.
 - Log and error messages are human-readable and carry the ids involved (`oid`,
   the record id, the external call's identifier) — not a bare stack trace or a
   message that only makes sense next to the line that threw it.
+- Log every exception at the point it's caught, even when the catch exists only to
+  retry (`RetryableSendException` caught inside a retry loop still gets a `log.warn`
+  with the attempt count) — a silent retry hides how often the call is actually
+  failing until the retry budget runs out with no trail explaining why.
+- Every response that isn't a 2xx gets a log line stating the reason before it's
+  returned — a `JAX-RS` `ExceptionMapper` logs the mapped exception's message and the
+  ids involved when it produces the 4xx/5xx, not just the status code.
+- Don't catch an exception in a DAO or utility method just because that's where it's
+  thrown. That layer can't tell whether the failure is retryable or what status code
+  it should become — only the resource/manager layer, or a dedicated
+  `ExceptionMapper`, has that context. Catch low only to wrap with more context and
+  rethrow; catch-and-decide belongs at the boundary.
 
 ## Multi-Tenancy: Every Query Scoped by oid
 

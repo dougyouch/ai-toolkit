@@ -145,3 +145,42 @@ opening it: something that builds is a `Builder`, something that validates is a
 `Validator`, something that wraps an external call is a `Client`/`Request`/`Adapter`,
 something observing events is a `Subscriber`. Pick the vocabulary per project and use
 it consistently rather than inventing a new word for the same role in every file.
+
+### 12. Log every exception, and log every non-success response
+
+Every time an exception is thrown, log it — including when the catch exists only to
+retry. A retry that swallows the exception silently hides how often it's actually
+failing; by the time the retry budget is exhausted, there's no record of why. Every
+request that doesn't return a 200 back to its caller gets a log line stating why —
+the actual reason (validation failure, downstream timeout, permission denial), not
+just the status code — so an incident doesn't start from a blank stack trace.
+
+### 13. Compose a checked wrapper instead of adding a flag to skip a check
+
+When some call sites need a check (permission, feature-gating, rate limiting) before
+an action and others don't, don't bolt a boolean onto the action to make the check
+optional — `update_status(user, object, new_status, skip_permission_check)`. A flag
+like that means the method is doing two jobs at once, and every caller now has to
+know which one it needs and pass the right flag to get it. It's also a sign the
+method was never properly laid out in the first place.
+
+Split it into two small methods instead: a bare method that does exactly what it's
+told (`update_status(object, new_status)`), and a separate, reusable method that
+wraps it with the check and raises if the check fails
+(`update_status_with_permission_check(user, object, new_status)` — something like
+`raise PermissionError unless user.id == object.user_id`, then a call to the bare
+method). A caller already behind a validated boundary calls the bare method
+directly; a caller that needs the check reusable across multiple entry points calls
+the wrapper. Both stay single-purpose and independently testable, and neither needs
+a flag to know which behavior the other wanted.
+
+### 14. Let exceptions bubble up to where they can be handled properly
+
+Don't catch and handle an exception at the low-level method where it's thrown just
+because it's convenient to do so there. That method usually can't tell whether the
+failure is retryable, whether it should produce a 4xx or a 5xx, or whether a fallback
+exists — only the caller, closer to the boundary (the controller, the job's retry
+wrapper, the request handler), has enough context to decide. Catch low only to add
+context and rethrow, or to log per Principle 12 before letting it propagate; catch
+and swallow only at the boundary that can actually turn the failure into a decision —
+a retry, an error status code, a fallback path.

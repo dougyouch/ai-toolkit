@@ -172,6 +172,18 @@ backed by a plain string column so new states don't require a schema migration.
 - Translate domain exceptions to transport-level responses (HTTP status codes) in one
   central place (a registered `@app.exception_handler(ExceptionType)` per exception
   type), not scattered `try/except` blocks in every route.
+- Log every exception at the point it's caught, even inside retry logic — a
+  `RetryableError` caught by a retry loop still gets a `logger.warning` with the
+  attempt number and the underlying cause; swallowing it silently means no one can
+  tell how often the call is failing until `RetryLimitReachedError` finally surfaces.
+- Every response that isn't a 200 gets a log line stating why before it goes out —
+  the `@app.exception_handler` that turns a domain exception into an `HTTPException`
+  logs the reason and the ids involved, not just the resulting status code.
+- Don't `except` and handle an error inside a repository or utility function just
+  because that's where it was raised — it usually can't tell whether the failure is
+  retryable or what status code it should become. Let it propagate to the
+  route/handler layer (or the retry wrapper) that owns that decision; catching low is
+  fine only to attach context and re-raise.
 
 ## Avoid Defensive Programming Downstream of the Boundary
 
@@ -191,7 +203,7 @@ def update_status(user, obj, new_status):
 # GOOD — a Depends() dependency already 404'd if the object was missing, and
 # another already 403'd if the user lacked permission. This function trusts both
 # and fails loudly (AttributeError) if that trust is ever broken.
-def update_status(user: User, obj: Widget, new_status: Status) -> None:
+def update_status(obj: Widget, new_status: Status) -> None:
     obj.status = new_status
 ```
 
@@ -200,6 +212,37 @@ mechanism for making this the boundary's job: they raise (typically an
 `HTTPException`) before the route body ever runs if the object doesn't exist or the
 user isn't authorized, so every function downstream of the route can be written as if
 its arguments are already known-good.
+
+When the same permission check needs to be reusable from more than one entry point
+(a route that already checked it via `Depends()`, *and* a background job or internal
+service call that doesn't sit behind that dependency), don't give the bare function a
+flag to make the check optional:
+
+```python
+# BAD — a flag parameter means the function does two jobs, and every caller has
+# to know which one it wants
+def update_status(user, obj, new_status, skip_permission_check=False):
+    if not skip_permission_check and user.id != obj.user_id:
+        raise PermissionError()
+    obj.status = new_status
+
+# GOOD — the bare action and the checked wrapper are two small, single-purpose,
+# independently testable functions
+def update_status(obj: Widget, new_status: Status) -> None:
+    obj.status = new_status
+
+def update_status_with_permission_check(
+    user: User, obj: Widget, new_status: Status
+) -> None:
+    if user.id != obj.user_id:
+        raise PermissionError()
+    update_status(obj, new_status)
+```
+
+A route already behind `Depends()` calls `update_status()` directly; a background
+job or any caller that isn't already behind that dependency calls
+`update_status_with_permission_check()`. Neither needs a flag to tell the other what
+it wants.
 
 ## Use the SDK's Typed Client
 

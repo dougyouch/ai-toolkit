@@ -166,6 +166,18 @@ each case.
   `parsing_errors` / `errors` just report.
 - Guard clauses (`return unless ...`, `next if ...`) over nested conditionals for
   early-exit validation.
+- Log every exception at the point it's rescued, even when the rescue exists only to
+  retry (`retry if attempts < max_attempts`) — logging the attempt count and the
+  underlying error. A silent retry hides how often the call is actually failing until
+  the retry budget is exhausted with nothing to explain why.
+- Every response that isn't a 200 gets a log line stating the reason before it's
+  returned — a controller rescuing into a 4xx/5xx logs the cause and the ids
+  involved, not just the status code.
+- Don't rescue in a model or service method just because that's where the error was
+  raised — it usually can't tell whether the failure is retryable or what status the
+  caller should get. Let it propagate to the controller (or the job's retry
+  wrapper) that owns that decision; rescuing low is fine only to add context and
+  re-raise.
 
 ## Avoid Defensive Programming Downstream of the Boundary
 
@@ -185,7 +197,7 @@ end
 # GOOD — the controller already authorized the user and loaded the record
 # (or raised ActiveRecord::RecordNotFound / Pundit::NotAuthorizedError trying).
 # This method trusts both and fails loudly (NoMethodError) if that trust is broken.
-def update_status(user, object, new_status)
+def update_status(object, new_status)
   object.update!(status: new_status)
 end
 ```
@@ -196,6 +208,35 @@ is well-formed — not for a downstream utility method re-guarding against a
 precondition its caller was already responsible for. If `object` can legitimately be
 `nil` by the time `update_status` is called, that's a bug in the caller to fix, not a
 case for `update_status` to handle gracefully.
+
+When the same permission check needs to be reusable from more than one entry point —
+a controller action that's already behind Pundit, *and* a service call or Sidekiq job
+that isn't — don't give the bare method a flag to make the check optional:
+
+```ruby
+# BAD — a flag parameter means the method does two jobs, and every caller has to
+# know which one it wants
+def update_status(user, object, new_status, skip_permission_check: false)
+  raise PermissionError unless skip_permission_check || user.id == object.user_id
+  object.update!(status: new_status)
+end
+
+# GOOD — the bare action and the checked wrapper are two small, single-purpose,
+# independently testable methods
+def update_status(object, new_status)
+  object.update!(status: new_status)
+end
+
+def update_status_with_permission_check(user, object, new_status)
+  raise PermissionError unless user.id == object.user_id
+  update_status(object, new_status)
+end
+```
+
+A controller action already behind Pundit calls `update_status` directly; a Sidekiq
+job or any caller that isn't already behind that authorization calls
+`update_status_with_permission_check`. Neither needs a flag to tell the other what it
+wants.
 
 ## Modules & Composition
 
