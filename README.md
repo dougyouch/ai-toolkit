@@ -13,3 +13,7 @@ AI Tools
   [`languages/python.md`](claude/skills/coding/languages/python.md), and
   [`languages/java.md`](claude/skills/coding/languages/java.md). Additional languages
   get their own file once there's a real codebase to draw the patterns from.
+
+## License
+
+[MIT](LICENSE)
