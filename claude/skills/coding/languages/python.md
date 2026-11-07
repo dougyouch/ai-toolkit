@@ -318,7 +318,7 @@ needed" is a liability, not an asset.
 
 - **Service** — business orchestration (`MappingService`).
 - **Repository** — pure data access, no business logic (`MappingRepository`).
-- **Client** — wraps an external API (`EvertrueAPIClient`, `AuthClient`).
+- **Client** — wraps an external API (`SystemAPIClient`, `AuthClient`).
 - **Config** / **Component** — declared configuration and the thing that applies it
   (`HttpClientConfig`, `HttpComponent`).
 - **Consumer** / **Producer** — message-queue handlers (`ContactsImportConsumer`).
